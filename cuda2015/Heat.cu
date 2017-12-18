@@ -7,9 +7,9 @@
 #define MAX_TEMP 1.0f
 #define MIN_TEMP 0.0001f
 #define SPEED 0.25f
-texture<float> texConstSrc;
-texture<float> texIn;
-texture<float> texOut;
+texture<float,2> texConstSrc;
+texture<float,2> texIn;
+texture<float,2> texOut;
 //using namespace std;
 struct DataBlock {
 	unsigned char *output_bitmap;
@@ -26,7 +26,7 @@ __global__ void copy_const_kernel(float *iptr) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x*gridDim.x;
-	float c = tex1Dfetch(texConstSrc, offset);
+	float c = tex2D(texConstSrc, x,y);
 	if (c != 0) iptr[offset] = c;
 }
 
@@ -46,18 +46,18 @@ __global__ void blend_kernel(float *outSrc, bool dstOut) {
 	if (y == DIM - 1) bottom -= DIM;
 
 	float t, l, c, r, b; if (dstOut) {
-		t = tex1Dfetch(texIn, top);
-		l = tex1Dfetch(texIn, left);
-		c = tex1Dfetch(texIn, offset);
-		r = tex1Dfetch(texIn, right);
-		b = tex1Dfetch(texIn, bottom);
+		t = tex2D(texIn, x  ,y-1);
+		l = tex2D(texIn, x-1,y);
+		c = tex2D(texIn, x  ,y);
+		r = tex2D(texIn, x+1,y);
+		b = tex2D(texIn, x,y+1);
 	}
 	else {
-		t = tex1Dfetch(texOut, top);
-		l = tex1Dfetch(texOut, left);
-		c = tex1Dfetch(texOut, offset);
-		r = tex1Dfetch(texOut, right); 
-		b = tex1Dfetch(texOut, bottom);
+		t = tex2D(texOut, x  ,y-1);
+		l = tex2D(texOut, x-1,y);
+		c = tex2D(texOut, x  ,y);
+		r = tex2D(texOut, x+1,y);
+		b = tex2D(texOut, x,y+1);
 	}
 	outSrc[offset] = c + SPEED*(t + l + r + b - 4 * c);
 }
@@ -69,7 +69,7 @@ void anim_gpu(DataBlock *d, int ticks) {
 	CPUAnimBitmap *bitmap = d->bitmap;
 	volatile bool dstOut = true;
 	float *in, *out;
-	for (int i = 0; i<90; i++) {
+	for (int i = 0; i<10; i++) {
 		if (dstOut) {
 			in = d->dev_inSrc;
 			out = d->dev_outSrc;
@@ -127,9 +127,19 @@ int main() {
 	HANDLE_ERROR(cudaMalloc((void**)&data.dev_constSrc,
 		bitmap.image_size()));
 	int image_size = bitmap.image_size();
-	cudaBindTexture(NULL, texConstSrc, data.dev_constSrc, image_size);
-	cudaBindTexture(NULL, texIn, data.dev_inSrc, image_size);
-	cudaBindTexture(NULL, texOut, data.dev_outSrc, image_size);
+	cudaChannelFormatDesc desc = cudaCreateChannelDesc<float>();
+	HANDLE_ERROR(cudaBindTexture2D(NULL, texConstSrc,
+		data.dev_constSrc,
+		desc, DIM, DIM,
+		sizeof(float) * DIM));
+	HANDLE_ERROR(cudaBindTexture2D(NULL, texIn,
+		data.dev_inSrc,
+		desc, DIM, DIM,
+		sizeof(float) * DIM));
+	HANDLE_ERROR(cudaBindTexture2D(NULL, texOut,
+		data.dev_outSrc,
+		desc, DIM, DIM,
+		sizeof(float) * DIM));
 	float *temp = (float*)malloc(bitmap.image_size());
 	for (int i = 0; i<DIM*DIM; i++) {
 		temp[i] = 0;
